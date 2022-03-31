@@ -39,9 +39,24 @@ const Home: NextPage = () => {
   const scVideoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
+    if (peer) return;
+
     navigator.mediaDevices
-      .getUserMedia({ video: true, audio: true })
-      .then((stream) => {
+      .getUserMedia({ audio: true, video: true })
+      .then(async (stream) => {
+        if (navigator.mediaDevices.getDisplayMedia) {
+          const videoStream = await navigator.mediaDevices
+            .getDisplayMedia({
+              video: true,
+            })
+            .catch(() => {});
+
+          if (videoStream) {
+            stream.removeTrack(stream.getVideoTracks()[0]);
+            stream.addTrack(videoStream.getVideoTracks()[0]);
+          }
+        }
+
         import('peerjs').then(({ default: Peer }) => {
           const newPeer = new Peer(socket.id, {
             host: '/',
@@ -50,16 +65,12 @@ const Home: NextPage = () => {
             path: 'peerjs',
           });
 
-          if (peer?.id !== newPeer.id) {
-            setPeer(newPeer);
-          }
+          setPeer(newPeer);
 
           setMyStream(stream);
         });
       });
-
-    peer?.on('open', () => socket.emit('join-room', 'room'));
-  }, [peer, socket]);
+  }, [peer, socket.id]);
 
   useEffect(() => {
     if (!myStream || !peer) return;
@@ -94,6 +105,8 @@ const Home: NextPage = () => {
   }, [calls, callsHandler, myStream, peer, socket]);
 
   useEffect(() => {
+    peer?.on('open', () => socket.emit('join-room', 'room'));
+
     const handlePeerCall = (call: Peer.MediaConnection) => {
       call.answer(myStream);
       callsHandler.push(call);
@@ -104,18 +117,17 @@ const Home: NextPage = () => {
 
       call.on('close', () => closeVideoStream(scVideoRef));
     };
-
     peer?.on('call', handlePeerCall);
 
     return () => {
       peer?.off('call', handlePeerCall);
     };
-  }, [callsHandler, myStream, peer]);
+  }, [callsHandler, myStream, peer, socket]);
 
   return (
-    <div className="flex h-full w-full items-center justify-center">
-      <video muted ref={videoRef} />
-      <video ref={scVideoRef} />
+    <div className="flex h-full w-full">
+      <video muted ref={videoRef} className="w-1/2" />
+      <video ref={scVideoRef} className="hidden w-1/2" />
     </div>
   );
 };
