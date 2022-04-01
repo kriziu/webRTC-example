@@ -33,14 +33,14 @@ nextApp.prepare().then(async () => {
 
     socket.on('join-room', (roomId: string) => {
       socket.join(roomId);
-      console.log(socket.id);
+      console.log('socketid', socket.id);
 
       socket.broadcast.to(roomId).emit('user-connected', socket.id);
     });
 
     socket.on('disconnecting', () => {
       const roomId = [...socket.rooms][1];
-      console.log([...socket.rooms][1]);
+      console.log('socketroom', [...socket.rooms][1]);
       socket.broadcast.to(roomId).emit('user-disconnected', socket.id);
     });
   });
