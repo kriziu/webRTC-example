@@ -109,7 +109,7 @@ const Home: NextPage = () => {
   }, [calls, callsHandler, myStream, peer, socket]);
 
   useEffect(() => {
-    const handlePeerCall = (call: Peer.MediaConnection) => {
+    peer?.on('call', (call) => {
       console.log('answer', call);
       call.answer(myStream);
       callsHandler.push(call);
@@ -119,8 +119,7 @@ const Home: NextPage = () => {
       });
 
       call.on('close', () => closeVideoStream(scVideoRef));
-    };
-    peer?.on('call', handlePeerCall);
+    });
 
     peer?.on('open', () => {
       socket.emit('join-room', 'room');
@@ -131,9 +130,6 @@ const Home: NextPage = () => {
       peer?.reconnect();
       console.log('reconnected');
     });
-    return () => {
-      peer?.off('call', handlePeerCall);
-    };
   }, [callsHandler, myStream, peer, socket]);
 
   useEffect(() => {
