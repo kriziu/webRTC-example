@@ -40,6 +40,7 @@ const Home: NextPage = () => {
   const scVideoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
+    console.log(peer);
     if (peer) return;
 
     navigator.mediaDevices
@@ -66,6 +67,7 @@ const Home: NextPage = () => {
     addVideoStream(videoRef, myStream);
 
     socket.on('user-connected', (userId) => {
+      console.log(userId);
       const call = peer.call(userId, myStream);
 
       if (!call) return;
@@ -95,6 +97,7 @@ const Home: NextPage = () => {
 
   useEffect(() => {
     const handlePeerCall = (call: Peer.MediaConnection) => {
+      console.log('answer', call);
       call.answer(myStream);
       callsHandler.push(call);
 
