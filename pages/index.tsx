@@ -32,6 +32,7 @@ const Home: NextPage = () => {
   const [socket] = useState(io);
   const [peer, setPeer] = useState<Peer>();
   const [myStream, setMyStream] = useState<MediaStream>();
+  const [cameraTrack, setCameraTrack] = useState<MediaStreamTrack>();
 
   const [calls, callsHandler] = useList<Peer.MediaConnection>();
 
@@ -44,19 +45,6 @@ const Home: NextPage = () => {
     navigator.mediaDevices
       .getUserMedia({ audio: true, video: true })
       .then(async (stream) => {
-        if (navigator.mediaDevices.getDisplayMedia) {
-          const videoStream = await navigator.mediaDevices
-            .getDisplayMedia({
-              video: true,
-            })
-            .catch(() => {});
-
-          if (videoStream) {
-            stream.removeTrack(stream.getVideoTracks()[0]);
-            stream.addTrack(videoStream.getVideoTracks()[0]);
-          }
-        }
-
         import('peerjs').then(({ default: Peer }) => {
           const newPeer = new Peer(socket.id, {
             host: '/',
@@ -66,7 +54,7 @@ const Home: NextPage = () => {
           });
 
           setPeer(newPeer);
-
+          setCameraTrack(stream.getVideoTracks()[0]);
           setMyStream(stream);
         });
       });
@@ -79,6 +67,7 @@ const Home: NextPage = () => {
 
     socket.on('user-connected', (userId) => {
       const call = peer.call(userId, myStream);
+
       if (!call) return;
 
       callsHandler.push(call);
@@ -105,8 +94,6 @@ const Home: NextPage = () => {
   }, [calls, callsHandler, myStream, peer, socket]);
 
   useEffect(() => {
-    peer?.on('open', () => socket.emit('join-room', 'room'));
-
     const handlePeerCall = (call: Peer.MediaConnection) => {
       call.answer(myStream);
       callsHandler.push(call);
@@ -119,16 +106,80 @@ const Home: NextPage = () => {
     };
     peer?.on('call', handlePeerCall);
 
+    const handlePeerOpen = () => socket.emit('join-room', 'room');
+    peer?.on('open', handlePeerOpen);
+
+    const handlePeerReconnect = () => peer?.reconnect();
+    peer?.on('disconnected', handlePeerReconnect);
     return () => {
       peer?.off('call', handlePeerCall);
+      peer?.off('open', handlePeerOpen);
+      peer?.off('disconnected', handlePeerReconnect);
     };
   }, [callsHandler, myStream, peer, socket]);
 
+  useEffect(() => {
+    calls.forEach((call) => {
+      if (!myStream) return;
+
+      const audioTrack = myStream?.getAudioTracks()[0];
+      const videoTrack = myStream?.getVideoTracks()[0];
+
+      call.peerConnection.getSenders()[0].replaceTrack(audioTrack);
+      call.peerConnection.getSenders()[1].replaceTrack(videoTrack);
+    });
+  }, [myStream, calls, cameraTrack]);
+
+  const handleChangeVideo = async () => {
+    if (!cameraTrack) {
+      const cameraVideo = await navigator.mediaDevices
+        .getUserMedia({
+          video: true,
+        })
+        .catch(() => {});
+
+      if (cameraVideo && myStream) {
+        const tempStream = myStream;
+        tempStream.removeTrack(tempStream.getVideoTracks()[0]);
+        tempStream.addTrack(cameraVideo.getVideoTracks()[0]);
+
+        setMyStream(tempStream);
+        setCameraTrack(cameraVideo.getVideoTracks()[0]);
+      }
+      return;
+    }
+
+    if (navigator.mediaDevices.getDisplayMedia) {
+      const videoStream = await navigator.mediaDevices
+        .getDisplayMedia({
+          video: true,
+        })
+        .catch(() => {});
+
+      if (videoStream && myStream) {
+        const tempStream = myStream;
+        tempStream.removeTrack(tempStream.getVideoTracks()[0]);
+        tempStream.addTrack(videoStream.getVideoTracks()[0]);
+
+        setMyStream(tempStream);
+        setCameraTrack(undefined);
+      }
+    }
+  };
+
   return (
-    <div className="flex h-full w-full">
-      <video muted ref={videoRef} className="w-1/2" />
-      <video ref={scVideoRef} className="hidden w-1/2" />
-    </div>
+    <>
+      <div className="flex w-full">
+        <video muted ref={videoRef} className="w-1/2" />
+        <video ref={scVideoRef} className="hidden w-1/2" />
+      </div>
+      <button
+        className="rounded-md bg-blue-500 py-2 px-4 text-white hover:bg-blue-600 active:bg-blue-400"
+        onClick={handleChangeVideo}
+      >
+        Change video
+      </button>
+    </>
   );
 };
 
