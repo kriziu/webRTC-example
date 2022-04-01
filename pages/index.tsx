@@ -118,15 +118,17 @@ const Home: NextPage = () => {
     };
     peer?.on('call', handlePeerCall);
 
-    const handlePeerOpen = () => socket.emit('join-room', 'room');
-    peer?.on('open', handlePeerOpen);
+    peer?.on('open', () => {
+      socket.emit('join-room', 'room');
+      console.log('open');
+    });
 
-    const handlePeerReconnect = () => peer?.reconnect();
-    peer?.on('disconnected', handlePeerReconnect);
+    peer?.on('disconnected', () => {
+      peer?.reconnect();
+      console.log('reconnected');
+    });
     return () => {
       peer?.off('call', handlePeerCall);
-      peer?.off('open', handlePeerOpen);
-      peer?.off('disconnected', handlePeerReconnect);
     };
   }, [callsHandler, myStream, peer, socket]);
 
