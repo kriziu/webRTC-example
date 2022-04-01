@@ -79,7 +79,11 @@ const Home: NextPage = () => {
       console.log('userid', userId);
       const call = peer.call(userId, myStream);
 
+      console.log('call on calling', call);
+      console.log('peer on calling', peer);
       if (!call) return;
+
+      console.log('called');
 
       callsHandler.push(call);
 
