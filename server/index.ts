@@ -29,7 +29,7 @@ nextApp.prepare().then(async () => {
 
   io.on('connection', (socket) => {
     console.log('connected to socket.io');
-    socket.emit('status', 'Hello from Socket.io');
+    socket.emit('port', port);
 
     socket.on('join-room', (roomId: string) => {
       socket.join(roomId);

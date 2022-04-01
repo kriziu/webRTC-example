@@ -29,6 +29,7 @@ const closeVideoStream = (scVideoRef: RefObject<HTMLVideoElement>) => {
 };
 
 const Home: NextPage = () => {
+  const [port, setPort] = useState(443);
   const [socket] = useState(io);
   const [peer, setPeer] = useState<Peer>();
   const [myStream, setMyStream] = useState<MediaStream>();
@@ -40,7 +41,16 @@ const Home: NextPage = () => {
   const scVideoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    console.log(peer);
+    socket.on('port', (portFromServer) => setPort(portFromServer));
+
+    return () => {
+      socket.off('port');
+    };
+  });
+
+  useEffect(() => {
+    console.log('peer', peer);
+    console.log('port', port);
     if (peer) return;
 
     navigator.mediaDevices
@@ -49,8 +59,7 @@ const Home: NextPage = () => {
         import('peerjs').then(({ default: Peer }) => {
           const newPeer = new Peer(socket.id, {
             host: '/',
-            port: 3000,
-
+            port,
             path: 'peerjs',
           });
 
@@ -59,7 +68,7 @@ const Home: NextPage = () => {
           setMyStream(stream);
         });
       });
-  }, [peer, socket.id]);
+  }, [peer, port, socket.id]);
 
   useEffect(() => {
     if (!myStream || !peer) return;
@@ -67,7 +76,7 @@ const Home: NextPage = () => {
     addVideoStream(videoRef, myStream);
 
     socket.on('user-connected', (userId) => {
-      console.log(userId);
+      console.log('userid', userId);
       const call = peer.call(userId, myStream);
 
       if (!call) return;
