@@ -112,54 +112,48 @@ const Home: NextPage = () => {
         peer.addStream(newStream);
       }
     });
+
+    isScreenSharing = !isScreenSharing;
     setMyStream(newStream);
   };
 
-  const handleChangeVideo = async () => {
+  const handleChangeVideo = () => {
     if (isScreenSharing) {
-      const cameraVideo = await navigator.mediaDevices
+      navigator.mediaDevices
         .getUserMedia({
           audio: true,
           video: true,
         })
+        .then((stream) => {
+          if (myStream) {
+            myStream.getTracks().forEach((track) => track.stop());
+            handleChangeStreams(stream);
+          }
+        })
         .catch(() => {});
-
-      if (cameraVideo && myStream) {
-        myStream.getTracks().forEach((track) => track.stop());
-
-        isScreenSharing = false;
-        handleChangeStreams(cameraVideo);
-      }
-      return;
-    }
-
-    if (navigator.mediaDevices.getDisplayMedia) {
-      const screenVideo = await navigator.mediaDevices
+    } else if (navigator.mediaDevices.getDisplayMedia) {
+      navigator.mediaDevices
         .getDisplayMedia({
           video: true,
         })
-        .catch(() => {});
+        .then((stream) => {
+          if (myStream) {
+            stream.addTrack(myStream.getAudioTracks()[0]);
 
-      if (screenVideo && myStream) {
-        screenVideo.addTrack(myStream.getAudioTracks()[0]);
+            stream.getVideoTracks()[0].addEventListener('ended', () => {
+              navigator.mediaDevices
+                .getUserMedia({
+                  video: true,
+                  audio: true,
+                })
+                .then((newStream) => handleChangeStreams(newStream))
+                .catch(() => {});
+            });
 
-        screenVideo.getVideoTracks()[0].addEventListener('ended', async () => {
-          const stream = await navigator.mediaDevices
-            .getUserMedia({
-              video: true,
-              audio: true,
-            })
-            .catch(() => {});
-
-          if (stream) {
             handleChangeStreams(stream);
-            isScreenSharing = false;
           }
-        });
-
-        isScreenSharing = true;
-        handleChangeStreams(screenVideo);
-      }
+        })
+        .catch(() => {});
     }
   };
 
