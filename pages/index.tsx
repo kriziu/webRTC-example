@@ -2,9 +2,11 @@
 import { RefObject, useEffect, useRef, useState } from 'react';
 
 import type { NextPage } from 'next';
-import type Peer from 'peerjs';
-import { useList } from 'react-use';
+import { useMap } from 'react-use';
+import Peer from 'simple-peer';
 import { io } from 'socket.io-client';
+
+let isScreenSharing = false;
 
 const addVideoStream = (
   scVideoRef: RefObject<HTMLVideoElement>,
@@ -20,132 +22,115 @@ const addVideoStream = (
   });
 };
 
-const closeVideoStream = (scVideoRef: RefObject<HTMLVideoElement>) => {
-  const remoteVideo = scVideoRef.current;
-  if (!remoteVideo) return;
+// const closeVideoStream = (scVideoRef: RefObject<HTMLVideoElement>) => {
+//   const remoteVideo = scVideoRef.current;
+//   if (!remoteVideo) return;
 
-  remoteVideo.srcObject = null;
-  remoteVideo.style.display = 'none';
-};
+//   remoteVideo.srcObject = null;
+//   remoteVideo.style.display = 'none';
+// };
 
 const Home: NextPage = () => {
-  const [port, setPort] = useState(443);
   const [socket] = useState(io);
-  const [peer, setPeer] = useState<Peer>();
   const [myStream, setMyStream] = useState<MediaStream>();
-  const [cameraTrack, setCameraTrack] = useState<MediaStreamTrack>();
 
-  const [calls, callsHandler] = useList<Peer.MediaConnection>();
+  const [peers, peersHandler] = useMap<Record<string, Peer.Instance>>();
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const scVideoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    socket.on('port', (portFromServer) => setPort(portFromServer));
-
-    return () => {
-      socket.off('port');
-    };
-  });
-
-  useEffect(() => {
-    console.log('peer', peer);
-    console.log('port', port);
-    if (peer) return;
-
     navigator.mediaDevices
       .getUserMedia({ audio: true, video: true })
       .then(async (stream) => {
-        import('peerjs').then(({ default: Peer }) => {
-          const newPeer = new Peer(socket.id, {
-            host: '/',
-            port,
-            path: 'peerjs',
-          });
+        socket.emit('join-room', 'room');
 
-          setPeer(newPeer);
-          setCameraTrack(stream.getVideoTracks()[0]);
-          setMyStream(stream);
-        });
+        setMyStream(stream);
       });
-  }, [peer, port, socket.id]);
+  }, [socket]);
 
   useEffect(() => {
-    if (!myStream || !peer) return;
+    if (!myStream) return;
 
     addVideoStream(videoRef, myStream);
 
-    socket.on('user-connected', (userId) => {
-      console.log('userid', userId);
-      const call = peer.call(userId, myStream);
+    socket.on('users-in-room', (users: string[]) => {
+      console.log(users);
+      if (!users) return;
 
-      console.log('call on calling', call);
-      console.log('peer on calling', peer);
-      if (!call) return;
+      users.forEach((user) => {
+        if (user === socket.id) return;
 
-      console.log('called');
+        const peer = new Peer({
+          initiator: true,
+          trickle: false,
+          stream: myStream,
+        });
 
-      callsHandler.push(call);
-
-      call.on('stream', (remoteStream) => {
-        addVideoStream(scVideoRef, remoteStream);
-      });
-
-      call.on('close', () => {
-        closeVideoStream(scVideoRef);
+        peersHandler.set(user as any, peer);
       });
     });
 
+    socket.on('user-joined', (userId) => {
+      console.log(userId, 'joined');
+
+      const peer = new Peer({
+        initiator: false,
+        trickle: false,
+        stream: myStream,
+      });
+
+      peersHandler.set(userId, peer);
+    });
+
+    socket.on('user-signal', (userId, signalReceived) => {
+      console.log(userId, 'signal');
+      console.log(peersHandler.get(userId));
+      peersHandler.get(userId)?.signal(signalReceived);
+    });
+
     socket.on('user-disconnected', (userId) => {
-      calls.find((call) => call.peer === userId)?.close();
-      callsHandler.filter((call) => call.peer !== userId);
+      peersHandler.remove(userId);
     });
 
     // eslint-disable-next-line consistent-return
     return () => {
-      socket.off('user-connected');
-      socket.off('user-disconnected');
+      socket.off('users_in_room');
+      socket.off('user-joined');
+      socket.off('user-signal');
     };
-  }, [calls, callsHandler, myStream, peer, socket]);
+  }, [myStream, socket, peersHandler, peers]);
 
   useEffect(() => {
-    peer?.on('call', (call) => {
-      console.log('answer', call);
-      call.answer(myStream);
-      callsHandler.push(call);
+    if (!Object.keys(peers).length) return;
 
-      call.on('stream', (remoteStream) => {
-        addVideoStream(scVideoRef, remoteStream);
+    Object.values(peers).forEach((peer) => {
+      peer.on('stream', (stream) => {
+        addVideoStream(scVideoRef, stream);
       });
 
-      call.on('close', () => closeVideoStream(scVideoRef));
+      peer.on('signal', (signal) => {
+        socket.emit('signal-received', 'room', signal);
+      });
+
+      // if (myStream) peer.addStream(myStream);
     });
 
-    peer?.on('open', () => {
-      socket.emit('join-room', 'room');
-      console.log('open');
-    });
+    // eslint-disable-next-line consistent-return
+    return () => {
+      Object.values(peers).forEach((peer) => {
+        peer.removeAllListeners('stream');
 
-    peer?.on('disconnected', () => {
-      peer?.reconnect();
-      console.log('reconnected');
-    });
-  }, [callsHandler, myStream, peer, socket]);
+        peer.removeAllListeners('signal');
 
-  useEffect(() => {
-    calls.forEach((call) => {
-      if (!myStream) return;
-
-      const audioTrack = myStream?.getAudioTracks()[0];
-      const videoTrack = myStream?.getVideoTracks()[0];
-
-      call.peerConnection.getSenders()[0].replaceTrack(audioTrack);
-      call.peerConnection.getSenders()[1].replaceTrack(videoTrack);
-    });
-  }, [myStream, calls, cameraTrack]);
+        // if (myStream) peer.removeStream(myStream);
+        console.log(peer);
+      });
+    };
+  }, [myStream, peers, socket]);
 
   const handleChangeVideo = async () => {
-    if (!cameraTrack) {
+    if (isScreenSharing) {
       const cameraVideo = await navigator.mediaDevices
         .getUserMedia({
           video: true,
@@ -153,30 +138,26 @@ const Home: NextPage = () => {
         .catch(() => {});
 
       if (cameraVideo && myStream) {
-        const tempStream = myStream;
-        tempStream.removeTrack(tempStream.getVideoTracks()[0]);
-        tempStream.addTrack(cameraVideo.getVideoTracks()[0]);
+        cameraVideo.addTrack(myStream.getAudioTracks()[0]);
 
-        setMyStream(tempStream);
-        setCameraTrack(cameraVideo.getVideoTracks()[0]);
+        setMyStream(cameraVideo);
+        isScreenSharing = false;
       }
       return;
     }
 
     if (navigator.mediaDevices.getDisplayMedia) {
-      const videoStream = await navigator.mediaDevices
+      const screenVideo = await navigator.mediaDevices
         .getDisplayMedia({
           video: true,
         })
         .catch(() => {});
 
-      if (videoStream && myStream) {
-        const tempStream = myStream;
-        tempStream.removeTrack(tempStream.getVideoTracks()[0]);
-        tempStream.addTrack(videoStream.getVideoTracks()[0]);
+      if (screenVideo && myStream) {
+        screenVideo.addTrack(myStream.getAudioTracks()[0]);
 
-        setMyStream(tempStream);
-        setCameraTrack(undefined);
+        setMyStream(screenVideo);
+        isScreenSharing = true;
       }
     }
   };

@@ -3,7 +3,6 @@ import { createServer } from 'http';
 
 import express from 'express';
 import next, { NextApiHandler } from 'next';
-import { ExpressPeerServer } from 'peer';
 import { Server } from 'socket.io';
 
 const port = parseInt(process.env.PORT || '3000', 10);
@@ -17,25 +16,24 @@ nextApp.prepare().then(async () => {
 
   const io = new Server(server);
 
-  const peerServer = ExpressPeerServer(server);
-
-  // peerServer.on('connection', () => console.log('connected to webRTC'));
-
-  app.use('/peerjs', peerServer);
-
-  // app.get('/hello', async (_, res) => {
-  //   res.send('Hello World');
-  // });
-
   io.on('connection', (socket) => {
     console.log('connected to socket.io');
-    socket.emit('port', port);
 
     socket.on('join-room', (roomId: string) => {
       socket.join(roomId);
-      console.log('socketid', socket.id);
 
-      socket.broadcast.to(roomId).emit('user-connected', socket.id);
+      const usersInRoom = io.sockets.adapter.rooms.get(roomId);
+
+      if (!usersInRoom) return;
+
+      io.to(socket.id).emit('users-in-room', [...usersInRoom.keys()]);
+
+      console.log('joined');
+      socket.broadcast.to(roomId).emit('user-joined', socket.id);
+    });
+
+    socket.on('signal-received', (roomId: string, signal: any) => {
+      socket.broadcast.to(roomId).emit('user-signal', socket.id, signal);
     });
 
     socket.on('disconnecting', () => {
