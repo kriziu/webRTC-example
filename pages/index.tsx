@@ -1,5 +1,4 @@
-/* eslint-disable no-param-reassign */
-import { RefObject, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { NextPage } from 'next';
 import { useMap } from 'react-use';
@@ -8,36 +7,14 @@ import { io } from 'socket.io-client';
 
 let isScreenSharing = false;
 
-const addVideoStream = (
-  scVideoRef: RefObject<HTMLVideoElement>,
-  stream: MediaStream
-) => {
-  const video = scVideoRef.current;
-  if (!video) return;
-
-  video.srcObject = stream;
-  video.style.display = 'block';
-  video.addEventListener('loadedmetadata', () => {
-    video.play();
-  });
-};
-
-// const closeVideoStream = (scVideoRef: RefObject<HTMLVideoElement>) => {
-//   const remoteVideo = scVideoRef.current;
-//   if (!remoteVideo) return;
-
-//   remoteVideo.srcObject = null;
-//   remoteVideo.style.display = 'none';
-// };
-
 const Home: NextPage = () => {
   const [socket] = useState(io);
   const [myStream, setMyStream] = useState<MediaStream>();
 
   const [peers, peersHandler] = useMap<Record<string, Peer.Instance>>();
+  const [streams, streamsHandler] = useMap<Record<string, MediaStream>>();
 
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const scVideoRef = useRef<HTMLVideoElement>(null);
+  const myVideoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     navigator.mediaDevices
@@ -50,14 +27,19 @@ const Home: NextPage = () => {
   }, [socket]);
 
   useEffect(() => {
+    const node = myVideoRef.current;
+    if (node && myStream) {
+      node.srcObject = myStream;
+      node.addEventListener('loadedmetadata', () => {
+        node.play();
+      });
+    }
+  }, [myStream]);
+
+  useEffect(() => {
     if (!myStream) return;
 
-    addVideoStream(videoRef, myStream);
-
     socket.on('users-in-room', (users: string[]) => {
-      console.log(users);
-      if (!users) return;
-
       users.forEach((user) => {
         if (user === socket.id) return;
 
@@ -72,8 +54,6 @@ const Home: NextPage = () => {
     });
 
     socket.on('user-joined', (userId) => {
-      console.log(userId, 'joined');
-
       const peer = new Peer({
         initiator: false,
         trickle: false,
@@ -84,13 +64,12 @@ const Home: NextPage = () => {
     });
 
     socket.on('user-signal', (userId, signalReceived) => {
-      console.log(userId, 'signal');
-      console.log(peersHandler.get(userId));
       peersHandler.get(userId)?.signal(signalReceived);
     });
 
     socket.on('user-disconnected', (userId) => {
       peersHandler.remove(userId);
+      streamsHandler.remove(userId);
     });
 
     // eslint-disable-next-line consistent-return
@@ -98,50 +77,58 @@ const Home: NextPage = () => {
       socket.off('users_in_room');
       socket.off('user-joined');
       socket.off('user-signal');
+      socket.off('user-disconnected');
     };
-  }, [myStream, socket, peersHandler, peers]);
+  }, [myStream, socket, peersHandler, peers, streamsHandler]);
 
   useEffect(() => {
     if (!Object.keys(peers).length) return;
 
-    Object.values(peers).forEach((peer) => {
-      peer.on('stream', (stream) => {
-        addVideoStream(scVideoRef, stream);
+    Object.keys(peers).forEach((userId) => {
+      peersHandler.get(userId).on('stream', (stream) => {
+        streamsHandler.set(userId, stream);
       });
 
-      peer.on('signal', (signal) => {
-        socket.emit('signal-received', 'room', signal);
-      });
-
-      // if (myStream) peer.addStream(myStream);
+      peersHandler
+        .get(userId)
+        .on('signal', (signal) =>
+          socket.emit('signal-received', signal, userId)
+        );
     });
 
     // eslint-disable-next-line consistent-return
     return () => {
       Object.values(peers).forEach((peer) => {
         peer.removeAllListeners('stream');
-
         peer.removeAllListeners('signal');
-
-        // if (myStream) peer.removeStream(myStream);
-        console.log(peer);
       });
     };
-  }, [myStream, peers, socket]);
+  }, [myStream, peers, peersHandler, socket, streamsHandler]);
+
+  const handleChangeStreams = (newStream: MediaStream) => {
+    Object.values(peers).forEach((peer) => {
+      if (myStream) {
+        peer.removeStream(myStream);
+        peer.addStream(newStream);
+      }
+    });
+    setMyStream(newStream);
+  };
 
   const handleChangeVideo = async () => {
     if (isScreenSharing) {
       const cameraVideo = await navigator.mediaDevices
         .getUserMedia({
+          audio: true,
           video: true,
         })
         .catch(() => {});
 
       if (cameraVideo && myStream) {
-        cameraVideo.addTrack(myStream.getAudioTracks()[0]);
+        myStream.getTracks().forEach((track) => track.stop());
 
-        setMyStream(cameraVideo);
         isScreenSharing = false;
+        handleChangeStreams(cameraVideo);
       }
       return;
     }
@@ -156,8 +143,22 @@ const Home: NextPage = () => {
       if (screenVideo && myStream) {
         screenVideo.addTrack(myStream.getAudioTracks()[0]);
 
-        setMyStream(screenVideo);
+        screenVideo.getVideoTracks()[0].addEventListener('ended', async () => {
+          const stream = await navigator.mediaDevices
+            .getUserMedia({
+              video: true,
+              audio: true,
+            })
+            .catch(() => {});
+
+          if (stream) {
+            handleChangeStreams(stream);
+            isScreenSharing = false;
+          }
+        });
+
         isScreenSharing = true;
+        handleChangeStreams(screenVideo);
       }
     }
   };
@@ -165,8 +166,20 @@ const Home: NextPage = () => {
   return (
     <>
       <div className="flex w-full">
-        <video muted ref={videoRef} className="w-1/2" />
-        <video ref={scVideoRef} className="hidden w-1/2" />
+        <video muted ref={myVideoRef} className="flex-1" />
+        {Object.keys(streams).map((userId) => (
+          <video
+            key={userId}
+            ref={(video) => {
+              // eslint-disable-next-line no-param-reassign
+              if (video) video.srcObject = streamsHandler.get(userId);
+              video?.addEventListener('loadedmetadata', () =>
+                video.play().catch(() => {})
+              );
+            }}
+            className="flex-1"
+          />
+        ))}
       </div>
       <button
         className="rounded-md bg-blue-500 py-2 px-4 text-white hover:bg-blue-600 active:bg-blue-400"

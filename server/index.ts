@@ -23,22 +23,22 @@ nextApp.prepare().then(async () => {
       socket.join(roomId);
 
       const usersInRoom = io.sockets.adapter.rooms.get(roomId);
-
       if (!usersInRoom) return;
 
-      io.to(socket.id).emit('users-in-room', [...usersInRoom.keys()]);
+      console.log('joined to', roomId);
 
-      console.log('joined');
+      io.to(socket.id).emit('users-in-room', [...usersInRoom.keys()]);
       socket.broadcast.to(roomId).emit('user-joined', socket.id);
     });
 
-    socket.on('signal-received', (roomId: string, signal: any) => {
-      socket.broadcast.to(roomId).emit('user-signal', socket.id, signal);
+    socket.on('signal-received', (signal: any, toSocketId: string) => {
+      console.log('received signal to', socket.id);
+
+      io.to(toSocketId).emit('user-signal', socket.id, signal);
     });
 
     socket.on('disconnecting', () => {
       const roomId = [...socket.rooms][1];
-      console.log('socketroom', [...socket.rooms][1]);
       socket.broadcast.to(roomId).emit('user-disconnected', socket.id);
     });
   });
