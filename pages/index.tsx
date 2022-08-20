@@ -75,11 +75,12 @@ const Home: NextPage = () => {
         }, 1000 / 128);
       });
 
-      peer.on('data', (data) => {
-        const { message } = JSON.parse(data.toString());
+      peer.on('data', (_) => {
+        // const { message } = JSON.parse(data.toString());
         const time = Date.now() - now;
         if (time < 1000) {
           counter += 1;
+          // eslint-disable-next-line no-console
           console.log(counter, time);
         }
 
